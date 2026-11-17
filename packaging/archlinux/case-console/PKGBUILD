@@ -1,0 +1,12 @@
+# Upstream's git package, built from this fork's case-console branch so it can replace
+# lianli-linux. Everything but the name and source comes from ../git/PKGBUILD.
+source "$startdir/../git/PKGBUILD"
+
+pkgname=lianli-linux-case
+# makepkg rewrites this from pkgver(); it has to live in this file for that to stick.
+pkgver=1.2.8.r2.g9c8ccd0
+pkgrel=1
+url="https://github.com/JoshuaHayesWasHere/lian-li-linux"
+provides=('lianli-linux')
+conflicts=('lianli-linux' 'lianli-linux-git')
+source=("lian-li-linux::git+${url}.git#branch=case-console")
