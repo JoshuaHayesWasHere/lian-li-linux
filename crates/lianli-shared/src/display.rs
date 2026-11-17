@@ -68,6 +68,9 @@ pub struct OutputRequest {
     pub modes: Vec<DisplayMode>,
     pub max_width: u32,
     pub max_height: u32,
+    /// Largest encoded frame the panel accepts in one transfer, when it advertises one.
+    #[serde(default)]
+    pub max_frame_bytes: Option<u32>,
 }
 
 impl OutputRequest {
@@ -206,6 +209,7 @@ mod tests {
             modes: vec![mode],
             max_width: 480,
             max_height: 480,
+            max_frame_bytes: None,
         };
         output.validate().unwrap();
         output.preferred.refresh_hz = 60;

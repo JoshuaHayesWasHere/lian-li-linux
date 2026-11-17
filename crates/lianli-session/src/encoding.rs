@@ -26,6 +26,24 @@ pub struct FrameRequest {
     pub format: PixelFormat,
     pub fps: u32,
     pub hardware_video: bool,
+    pub max_frame_bytes: Option<u32>,
+}
+
+const JPEG_QUALITIES: [i32; 6] = [90, 80, 70, 60, 50, 40];
+
+/// The best JPEG quality whose frame fits the panel's transfer limit.
+fn compress_jpeg(image: turbojpeg::Image<&[u8]>, max_bytes: Option<u32>) -> Result<Vec<u8>> {
+    let limit = max_bytes.map_or(usize::MAX, |bytes| bytes as usize);
+    for quality in JPEG_QUALITIES {
+        let jpeg = turbojpeg::compress(image, quality, turbojpeg::Subsamp::Sub2x2)?;
+        if jpeg.len() <= limit {
+            return Ok(jpeg.to_vec());
+        }
+    }
+    anyhow::bail!(
+        "Desktop frame does not fit the panel's {limit}-byte limit at JPEG quality {}",
+        JPEG_QUALITIES[JPEG_QUALITIES.len() - 1]
+    )
 }
 
 impl Encoder {
@@ -86,7 +104,7 @@ impl Encoder {
             "Desktop frame layout changed unexpectedly"
         );
         let result = match request.codec {
-            DisplayCodec::Jpeg => Ok(turbojpeg::compress(
+            DisplayCodec::Jpeg => compress_jpeg(
                 turbojpeg::Image {
                     pixels: frame.pixels,
                     width: frame.mode.width as usize,
@@ -98,10 +116,8 @@ impl Encoder {
                         turbojpeg::PixelFormat::BGRX
                     },
                 },
-                90,
-                turbojpeg::Subsamp::Sub2x2,
-            )?
-            .to_vec()),
+                request.max_frame_bytes,
+            ),
             DisplayCodec::H264 => {
                 if self.cpu_input.is_none() {
                     self.cpu_input = Some(H264Encoder::new(
@@ -297,6 +313,7 @@ mod tests {
                         format: PixelFormat::Argb8888,
                         fps: 30,
                         hardware_video,
+                        max_frame_bytes: None,
                     },
                     &AtomicBool::new(false),
                 )
@@ -317,5 +334,51 @@ mod tests {
             encoder.reset(&mut capture).unwrap();
             assert!(encoder.status().is_none());
         }
+    }
+
+    fn noise(width: usize, height: usize) -> Vec<u8> {
+        let mut state = 0x2545_f491_u32;
+        (0..width * height * 4)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                state as u8
+            })
+            .collect()
+    }
+
+    fn image(pixels: &[u8], side: usize) -> turbojpeg::Image<&[u8]> {
+        turbojpeg::Image {
+            pixels,
+            width: side,
+            height: side,
+            pitch: side * 4,
+            format: turbojpeg::PixelFormat::BGRX,
+        }
+    }
+
+    #[test]
+    fn jpeg_frames_step_down_in_quality_to_fit_the_panel_limit() {
+        let pixels = noise(480, 480);
+        let best = super::compress_jpeg(image(&pixels, 480), None).unwrap();
+        let limit = (best.len() * 3 / 4) as u32;
+        let fitted = super::compress_jpeg(image(&pixels, 480), Some(limit)).unwrap();
+        assert!(fitted.len() <= limit as usize);
+        assert!(!fitted.is_empty());
+    }
+
+    #[test]
+    fn jpeg_frames_that_fit_keep_full_quality() {
+        let pixels = vec![40; 480 * 480 * 4];
+        let unbounded = super::compress_jpeg(image(&pixels, 480), None).unwrap();
+        let bounded = super::compress_jpeg(image(&pixels, 480), Some(131_030)).unwrap();
+        assert_eq!(bounded, unbounded);
+    }
+
+    #[test]
+    fn jpeg_frames_that_never_fit_are_rejected() {
+        let pixels = noise(480, 480);
+        assert!(super::compress_jpeg(image(&pixels, 480), Some(1_000)).is_err());
     }
 }
