@@ -1,5 +1,3 @@
-# Upstream's git package, built from this fork's case-console branch so it can replace
-# lianli-linux. Everything but the name and source comes from ../git/PKGBUILD.
 source "$startdir/../git/PKGBUILD"
 
 pkgname=lianli-linux-case

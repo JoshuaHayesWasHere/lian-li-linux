@@ -58,7 +58,7 @@ impl ServiceManager {
             return;
         }
         self.start_openrgb_server();
-        self.ensure_aio_defaults();
+        self.migrate_aio_fan_groups();
         if signals.requested() {
             return;
         }
@@ -130,10 +130,7 @@ impl ServiceManager {
         self.controllers.aio = Some(controller);
     }
 
-    /// Migrates any legacy FanGroup targeting a discovered AIO into its AioConfig.
-    /// No config means the AIO is left alone: no PWM writes, and for wireless AIOs
-    /// no wireless theme switch, which would cover a panel driven over USB.
-    pub(super) fn ensure_aio_defaults(&mut self) {
+    pub(super) fn migrate_aio_fan_groups(&mut self) {
         if self.startup_image_job.is_some() {
             self.startup_config_pending = true;
             return;
@@ -158,8 +155,6 @@ impl ServiceManager {
         };
 
         let mut changed = false;
-        // Wired: migrate legacy fan groups only — absence of config leaves
-        // the device firmware in control.
         for device_id in &wired_aio_ids {
             if cfg.migrate_aio_fangroup(device_id) {
                 info!("Migrated legacy fan group for AIO {device_id} into aio config");

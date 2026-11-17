@@ -15,12 +15,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
-// These firmware revisions acknowledge H.264 but cannot reliably display it. On the
-// HydroShift II LCD (AD22) the two-frame H.264 budget blurs every keyframe, so a busy
-// screen pulses twice a second; independent JPEG frames do not.
-const JPEG_FORCE_PIDS: &[u16] = &[0xACD1, 0xAD11, 0xAD22, 0xAD26];
-// pack_frame adds a 10-byte header and commit trailer around each JPEG.
-const JPEG_FRAME_OVERHEAD: u32 = 10;
+// These firmware revisions acknowledge H.264 but cannot reliably display it.
+const JPEG_FORCE_PIDS: &[u16] = &[0xACD1, 0xAD11, 0xAD26];
+// At 480x480 the two-frame H.264 budget blurs every keyframe, so the screen pulses twice a second.
+const JPEG_PREFERRED_PIDS: &[u16] = &[0xAD22];
 
 pub(super) fn spawn_worker(
     target: TurzxDeviceMatch,
@@ -86,10 +84,12 @@ fn run_worker(
         modes: caps.modes.iter().copied().map(convert).collect(),
         max_width: u32::from(caps.max_w),
         max_height: u32::from(caps.max_h),
-        max_frame_bytes: (caps.max_transfer > JPEG_FRAME_OVERHEAD)
-            .then(|| caps.max_transfer - JPEG_FRAME_OVERHEAD),
+        max_frame_bytes: caps
+            .max_transfer
+            .checked_sub(turzx::FRAME_OVERHEAD as u32)
+            .filter(|bytes| *bytes > 0),
     };
-    let codec = if JPEG_FORCE_PIDS.contains(&pid) {
+    let codec = if JPEG_FORCE_PIDS.contains(&pid) || JPEG_PREFERRED_PIDS.contains(&pid) {
         DisplayCodec::Jpeg
     } else {
         DisplayCodec::H264

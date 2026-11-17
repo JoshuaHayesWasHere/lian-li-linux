@@ -31,8 +31,10 @@ fn write_header(buf: &mut Vec<u8>, opcode: u8, offset: u32, size: u32) {
     buf.push((size & 0xFF) as u8);
 }
 
+pub const FRAME_OVERHEAD: usize = 10;
+
 pub fn pack_frame(opcode: u8, offset: u32, payload: &[u8]) -> Vec<u8> {
-    let mut pkt = Vec::with_capacity(payload.len() + 10);
+    let mut pkt = Vec::with_capacity(payload.len() + FRAME_OVERHEAD);
     write_header(&mut pkt, opcode, offset, payload.len() as u32);
     pkt.extend_from_slice(payload);
     pkt.push(MAGIC);

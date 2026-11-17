@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Move the case-console branch onto upstream's newest release, test it, push it, and
-# say so. Installing stays a manual `makepkg -si`, since it needs sudo.
 set -euo pipefail
 
 repo="$(git -C "$(dirname "$(readlink -f "$0")")" rev-parse --show-toplevel)"

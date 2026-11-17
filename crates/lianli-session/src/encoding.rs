@@ -31,7 +31,6 @@ pub struct FrameRequest {
 
 const JPEG_QUALITIES: [i32; 6] = [90, 80, 70, 60, 50, 40];
 
-/// The best JPEG quality whose frame fits the panel's transfer limit.
 fn compress_jpeg(image: turbojpeg::Image<&[u8]>, max_bytes: Option<u32>) -> Result<Vec<u8>> {
     let limit = max_bytes.map_or(usize::MAX, |bytes| bytes as usize);
     for quality in JPEG_QUALITIES {
