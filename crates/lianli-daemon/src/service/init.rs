@@ -130,11 +130,9 @@ impl ServiceManager {
         self.controllers.aio = Some(controller);
     }
 
-    /// For each discovered AIO, ensure an AioConfig exists in the user's config.
-    /// Migrates any legacy FanGroup targeting that device, then inserts defaults.
-    /// Wireless devices get a default config (all-off / device-managed); wired
-    /// AIOs only get legacy-group migration — no config means no PWM writes,
-    /// leaving the device's firmware in control until the user configures it.
+    /// Migrates any legacy FanGroup targeting a discovered AIO into its AioConfig.
+    /// No config means the AIO is left alone: no PWM writes, and for wireless AIOs
+    /// no wireless theme switch, which would cover a panel driven over USB.
     pub(super) fn ensure_aio_defaults(&mut self) {
         if self.startup_image_job.is_some() {
             self.startup_config_pending = true;
@@ -175,14 +173,6 @@ impl ServiceManager {
             let device_id = format!("wireless:{}", device.mac_str());
             if cfg.migrate_aio_fangroup(&device_id) {
                 info!("Migrated legacy fan group for AIO {device_id} into aio config");
-                changed = true;
-            }
-            if !cfg.aio.contains_key(&device_id) {
-                cfg.aio.insert(
-                    device_id.clone(),
-                    lianli_shared::aio::AioConfig::defaults_for_host(),
-                );
-                info!("Created default AIO config for {device_id}");
                 changed = true;
             }
         }
