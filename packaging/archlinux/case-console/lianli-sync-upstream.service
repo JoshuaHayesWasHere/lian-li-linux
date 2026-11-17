@@ -1,0 +1,6 @@
+[Unit]
+Description=Move lianli-linux-case onto upstream's newest release
+
+[Service]
+Type=oneshot
+ExecStart=%h/repos/lian-li-linux/packaging/archlinux/case-console/sync-upstream
