@@ -407,7 +407,7 @@ mod tests {
         };
         assert!(found(discover(&proc_root, &runtime, &session).unwrap()).is_none());
 
-        drop(UnixListener::bind(runtime.join("wayland-1")).unwrap());
+        drop(std::os::unix::net::UnixDatagram::bind(runtime.join("wayland-1")).unwrap());
         let _live = UnixListener::bind(runtime.join("wayland-0")).unwrap();
         fs::write(runtime.join("wayland-0.lock"), b"").unwrap();
         let environment = found(discover(&proc_root, &runtime, &session).unwrap()).unwrap();
