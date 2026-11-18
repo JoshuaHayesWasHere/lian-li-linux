@@ -55,7 +55,7 @@ pub fn pack_fragment(opcode: u8, offset: u32, payload: &[u8]) -> Vec<u8> {
 /// `0xAF 0x66` commit marker.
 pub fn fragment_stream_a(packet: &[u8], urb_max: usize) -> Vec<Vec<u8>> {
     let urb_max = urb_max.max(16);
-    let budget_final = urb_max.saturating_sub(10);
+    let budget_final = urb_max.saturating_sub(FRAME_OVERHEAD);
     let budget_frag = urb_max.saturating_sub(8);
 
     if packet.len() <= budget_final {

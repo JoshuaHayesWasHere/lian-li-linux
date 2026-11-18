@@ -799,7 +799,7 @@ mod tests {
         service.startup_image_quarantine.insert("h2".into());
         assert!(service.clear_startup_recovery("h2").is_err());
         assert!(service.startup_image_quarantine.contains("h2"));
-        service.migrate_aio_fan_groups();
+        service.ensure_aio_defaults();
         service.sync_ipc_state();
         assert!(service.startup_config_pending);
         assert!(!service.config.as_ref().unwrap().aio.contains_key("h2"));

@@ -1,6 +1,7 @@
 use anyhow::{ensure, Context, Result};
 use lianli_display::frame::{Mode, PixelFormat};
 use lianli_display::Capture;
+use lianli_media::common::{encode_jpeg_to_fit, JpegQualityMemo};
 use lianli_media::video::vaapi::{DmaFrame, DmaPlane, VaapiEncoder};
 use lianli_media::video::H264Encoder;
 use lianli_shared::display::{
@@ -17,6 +18,7 @@ pub struct Encoder {
     cpu_readback_reason: Option<CpuReadbackReason>,
     software_reason: Option<SoftwareEncodingReason>,
     status: Option<DesktopEncodingStatus>,
+    jpeg_quality: JpegQualityMemo,
 }
 
 #[derive(Clone, Copy)]
@@ -27,22 +29,6 @@ pub struct FrameRequest {
     pub fps: u32,
     pub hardware_video: bool,
     pub max_frame_bytes: Option<u32>,
-}
-
-const JPEG_QUALITIES: [i32; 6] = [90, 80, 70, 60, 50, 40];
-
-fn compress_jpeg(image: turbojpeg::Image<&[u8]>, max_bytes: Option<u32>) -> Result<Vec<u8>> {
-    let limit = max_bytes.map_or(usize::MAX, |bytes| bytes as usize);
-    for quality in JPEG_QUALITIES {
-        let jpeg = turbojpeg::compress(image, quality, turbojpeg::Subsamp::Sub2x2)?;
-        if jpeg.len() <= limit {
-            return Ok(jpeg.to_vec());
-        }
-    }
-    anyhow::bail!(
-        "Desktop frame does not fit the panel's {limit}-byte limit at JPEG quality {}",
-        JPEG_QUALITIES[JPEG_QUALITIES.len() - 1]
-    )
 }
 
 impl Encoder {
@@ -57,6 +43,7 @@ impl Encoder {
         self.cpu_readback_reason = None;
         self.software_reason = None;
         self.status = None;
+        self.jpeg_quality = JpegQualityMemo::default();
         capture.discard_gpu()
     }
 
@@ -103,7 +90,7 @@ impl Encoder {
             "Desktop frame layout changed unexpectedly"
         );
         let result = match request.codec {
-            DisplayCodec::Jpeg => compress_jpeg(
+            DisplayCodec::Jpeg => Ok(encode_jpeg_to_fit(
                 turbojpeg::Image {
                     pixels: frame.pixels,
                     width: frame.mode.width as usize,
@@ -115,8 +102,12 @@ impl Encoder {
                         turbojpeg::PixelFormat::BGRX
                     },
                 },
-                request.max_frame_bytes,
-            ),
+                90,
+                request
+                    .max_frame_bytes
+                    .map_or(usize::MAX, |bytes| bytes as usize),
+                &self.jpeg_quality,
+            )?),
             DisplayCodec::H264 => {
                 if self.cpu_input.is_none() {
                     self.cpu_input = Some(H264Encoder::new(
@@ -335,49 +326,46 @@ mod tests {
         }
     }
 
-    fn noise(width: usize, height: usize) -> Vec<u8> {
+    #[test]
+    fn jpeg_frames_step_down_to_the_frame_limit_until_reset() {
         let mut state = 0x2545_f491_u32;
-        (0..width * height * 4)
-            .map(|_| {
-                state ^= state << 13;
-                state ^= state >> 17;
-                state ^= state << 5;
-                state as u8
-            })
-            .collect()
-    }
-
-    fn image(pixels: &[u8], side: usize) -> turbojpeg::Image<&[u8]> {
-        turbojpeg::Image {
-            pixels,
-            width: side,
-            height: side,
-            pitch: side * 4,
-            format: turbojpeg::PixelFormat::BGRX,
-        }
-    }
-
-    #[test]
-    fn jpeg_frames_step_down_in_quality_to_fit_the_panel_limit() {
-        let pixels = noise(480, 480);
-        let best = super::compress_jpeg(image(&pixels, 480), None).unwrap();
-        let limit = (best.len() * 3 / 4) as u32;
-        let fitted = super::compress_jpeg(image(&pixels, 480), Some(limit)).unwrap();
-        assert!(fitted.len() <= limit as usize);
-        assert!(!fitted.is_empty());
-    }
-
-    #[test]
-    fn jpeg_frames_that_fit_keep_full_quality() {
-        let pixels = vec![40; 480 * 480 * 4];
-        let unbounded = super::compress_jpeg(image(&pixels, 480), None).unwrap();
-        let bounded = super::compress_jpeg(image(&pixels, 480), Some(131_030)).unwrap();
-        assert_eq!(bounded, unbounded);
-    }
-
-    #[test]
-    fn jpeg_frames_that_never_fit_are_rejected() {
-        let pixels = noise(480, 480);
-        assert!(super::compress_jpeg(image(&pixels, 480), Some(1_000)).is_err());
+        let mut capture = SoftwareCapture {
+            pixels: (0..16 * 16 * 4)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 17;
+                    state ^= state << 5;
+                    state as u8
+                })
+                .collect(),
+            frames: 0,
+        };
+        let request = |max_frame_bytes| FrameRequest {
+            codec: DisplayCodec::Jpeg,
+            mode: mode(),
+            format: PixelFormat::Argb8888,
+            fps: 30,
+            hardware_video: false,
+            max_frame_bytes,
+        };
+        let stop = AtomicBool::new(false);
+        let mut encoder = Encoder::default();
+        let full = encoder.encode(&mut capture, request(None), &stop).unwrap();
+        let limit = full.len() - 1;
+        let fitted = encoder
+            .encode(&mut capture, request(Some(limit as u32)), &stop)
+            .unwrap();
+        assert!(fitted.len() <= limit);
+        assert_eq!(
+            encoder
+                .encode(&mut capture, request(Some(full.len() as u32)), &stop)
+                .unwrap(),
+            fitted
+        );
+        encoder.reset(&mut capture).unwrap();
+        assert_eq!(
+            encoder.encode(&mut capture, request(None), &stop).unwrap(),
+            full
+        );
     }
 }

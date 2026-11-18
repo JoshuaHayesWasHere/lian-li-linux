@@ -68,7 +68,7 @@ pub struct OutputRequest {
     pub modes: Vec<DisplayMode>,
     pub max_width: u32,
     pub max_height: u32,
-    /// Largest encoded frame the panel accepts in one transfer, when it advertises one.
+    /// Largest JPEG frame to send in one transfer (descriptor max_transfer minus framing).
     #[serde(default)]
     pub max_frame_bytes: Option<u32>,
 }
@@ -85,6 +85,12 @@ impl OutputRequest {
         );
         for mode in &self.modes {
             self.validate_mode(*mode)?;
+        }
+        if let Some(bytes) = self.max_frame_bytes {
+            ensure!(
+                (1..=MAX_ENCODED_BYTES as u32).contains(&bytes),
+                "Invalid encoded frame limit"
+            );
         }
         self.validate_mode(self.preferred)
     }
@@ -215,6 +221,13 @@ mod tests {
         output.preferred.refresh_hz = 60;
         assert!(output.validate().is_err());
         output.preferred = mode;
+        output.max_frame_bytes = Some(131_030);
+        output.validate().unwrap();
+        output.max_frame_bytes = Some(0);
+        assert!(output.validate().is_err());
+        output.max_frame_bytes = Some(MAX_ENCODED_BYTES as u32 + 1);
+        assert!(output.validate().is_err());
+        output.max_frame_bytes = None;
         output.edid.resize(1024, 0);
         assert!(output.validate().is_err());
     }

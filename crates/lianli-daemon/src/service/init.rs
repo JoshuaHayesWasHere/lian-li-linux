@@ -58,7 +58,7 @@ impl ServiceManager {
             return;
         }
         self.start_openrgb_server();
-        self.migrate_aio_fan_groups();
+        self.ensure_aio_defaults();
         if signals.requested() {
             return;
         }
@@ -130,7 +130,12 @@ impl ServiceManager {
         self.controllers.aio = Some(controller);
     }
 
-    pub(super) fn migrate_aio_fan_groups(&mut self) {
+    /// For each discovered AIO, ensure an AioConfig exists in the user's config.
+    /// Migrates any legacy FanGroup targeting that device, then inserts defaults.
+    /// Wireless devices get a default config (all-off / device-managed); wired
+    /// AIOs only get legacy-group migration — no config means no PWM writes,
+    /// leaving the device's firmware in control until the user configures it.
+    pub(super) fn ensure_aio_defaults(&mut self) {
         if self.startup_image_job.is_some() {
             self.startup_config_pending = true;
             return;
@@ -155,6 +160,8 @@ impl ServiceManager {
         };
 
         let mut changed = false;
+        // Wired: migrate legacy fan groups only — absence of config leaves
+        // the device firmware in control.
         for device_id in &wired_aio_ids {
             if cfg.migrate_aio_fangroup(device_id) {
                 info!("Migrated legacy fan group for AIO {device_id} into aio config");
@@ -168,6 +175,14 @@ impl ServiceManager {
             let device_id = format!("wireless:{}", device.mac_str());
             if cfg.migrate_aio_fangroup(&device_id) {
                 info!("Migrated legacy fan group for AIO {device_id} into aio config");
+                changed = true;
+            }
+            if !cfg.aio.contains_key(&device_id) {
+                cfg.aio.insert(
+                    device_id.clone(),
+                    lianli_shared::aio::AioConfig::defaults_for_host(),
+                );
+                info!("Created default AIO config for {device_id}");
                 changed = true;
             }
         }
