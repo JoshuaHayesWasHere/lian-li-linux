@@ -9,6 +9,7 @@ use std::os::fd::{AsFd, AsRawFd, FromRawFd};
 use std::os::unix::fs::FileExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use wayland_client::backend::WaylandError;
 use wayland_client::protocol::{wl_buffer, wl_output, wl_registry, wl_shm, wl_shm_pool};
 use wayland_client::{
     delegate_noop, event_created_child, Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum,
@@ -136,7 +137,7 @@ impl Capture for HyprlandCapture {
         self.state.ready = false;
         self.state.announced = false;
         self.state.buffer.take();
-        self.connection.flush()?;
+        flush(&self.connection)?;
         Ok(())
     }
 
@@ -214,7 +215,7 @@ impl Capture for HyprlandCapture {
         self.state.pending_damage = crate::frame::FrameDamage::Unchanged;
         self.state.y_invert = false;
         self.state.buffer_spec = None;
-        self.connection.flush()?;
+        flush(&self.connection)?;
         Ok(false)
     }
 
@@ -500,7 +501,7 @@ fn dispatch(
 ) -> Result<()> {
     let count = queue.dispatch_pending(state)?;
     state.check_error()?;
-    connection.flush()?;
+    flush(connection)?;
     if count > 0 {
         return Ok(());
     }
@@ -531,9 +532,24 @@ fn dispatch(
         }
         return Err(error.into());
     }
-    guard.read()?;
+    match guard.read() {
+        Err(error) if would_block(&error) => return Ok(()),
+        result => result?,
+    };
     queue.dispatch_pending(state)?;
     state.check_error()
+}
+
+/// A full socket keeps requests queued for the next flush.
+fn flush(connection: &Connection) -> Result<()> {
+    match connection.flush() {
+        Err(error) if would_block(&error) => Ok(()),
+        result => Ok(result?),
+    }
+}
+
+fn would_block(error: &WaylandError) -> bool {
+    matches!(error, WaylandError::Io(error) if error.kind() == io::ErrorKind::WouldBlock)
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State {
